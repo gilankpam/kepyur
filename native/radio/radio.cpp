@@ -29,6 +29,11 @@ constexpr double kStep = 20e6;       // a hump up to ~13 MHz wide is fully insid
 constexpr double kCapture = 0.09;    // s of IQ per scan step (60 ms acquisition + ~300 lines)
 constexpr double kPsdSpan = 0.012;   // s of it for the spectrum
 constexpr int kSettleBanks = 40;     // ~8 ms after a retune (chip AGC)
+// A watch at 40 MS/s that restarts this often falls back to 20 MS/s (same picture: the BW20 RX filter is
+// +-10 MHz either way). A link that cannot carry 40 MS/s restarts every 0.2-0.3 s (Chrome's WebUSB: ~14k
+// transfers/s against the 24.4k needed); a healthy one runs minutes without one.
+constexpr int kFallbackFaults = 3;
+constexpr int64_t kFallbackWindowMs = 5000;
 
 // Raise this thread's priority (the USB stream thread must never miss a chip deadline; the DSP thread
 // must keep up). Best effort: logs what the OS allowed.
@@ -89,6 +94,7 @@ void Radio::open(int fd) {
     _mode_epoch++;
     _req_hz = s.freq;
     _req_rate = s.rate_sel;
+    _fallback = false;
   }
   _banks = 0;
   _dropped = 0;
@@ -202,6 +208,7 @@ void Radio::idle() {
 void Radio::set_watch_rate(int rate_sel) {
   std::lock_guard<std::mutex> l(_m);
   _watch_rate = rate_sel;
+  _fallback = false;
 }
 
 void Radio::set_gain(double db) {
@@ -269,15 +276,15 @@ void Radio::dsp_loop() {
           std::lock_guard<std::mutex> l(_m);
           hz = _watch_hz;
         }
-        // Watch at 40 MS/s with the chip's AGC. At 20 MS/s (20 MHz channel) the X200 Pro's adapter streams
-        // runs of 120 frozen samples (~3900/s with AGC: grey streaks with a coloured tail); fixed gain avoids
-        // them only below saturation. 40 MS/s: none, and 60 s with colour decoding: 0 bank-deadline restarts.
-        KP_LOGI("radio: watch %.3f MHz", hz / 1e6);
+        // Watch at 40 MS/s with the chip's AGC, or 20 MS/s after a fallback (watch_fault). Both on a 40 MHz
+        // channel: at 20 MHz width the OFDM CCA/AGC froze the LA in 120-sample runs (wifi-sdr RxSettings::wide).
         int rate;
         {
           std::lock_guard<std::mutex> l(_m);
-          rate = _watch_rate;
+          rate = _fallback && _watch_rate == 1 ? 2 : _watch_rate;
         }
+        KP_LOGI("radio: watch %.3f MHz at %.0f MS/s", hz / 1e6, wsdr::Receiver::rate_of(rate) / 1e6);
+        _watch_faults.clear();
         tune(hz, rate);
       } else if (mode == Mode::Scan) {
         _plan = scan_plan();
@@ -330,14 +337,37 @@ void Radio::dsp_loop() {
   }
 }
 
+// A stream restart during a watch. At 40 MS/s, kFallbackFaults of them within kFallbackWindowMs switch the
+// watch to 20 MS/s for the rest of the session; true when it did (the bank in hand is from the old stream).
+bool Radio::watch_fault(double hz) {
+  if (_fe_fs != 40e6) return false;
+  const int64_t t = now_ms();
+  _watch_faults.push_back(t);
+  while (!_watch_faults.empty() && t - _watch_faults.front() > kFallbackWindowMs) _watch_faults.pop_front();
+  if (static_cast<int>(_watch_faults.size()) < kFallbackFaults) return false;
+  {
+    std::lock_guard<std::mutex> l(_m);
+    _fallback = true;
+  }
+  KP_LOGW("radio: 40 MS/s restarted %zu times in %lld s: watching at 20 MS/s from now on", _watch_faults.size(),
+          static_cast<long long>(kFallbackWindowMs / 1000));
+  _watch_faults.clear();
+  _fe.reset();
+  _fe_gen = ~0u;
+  tune(hz, 2);
+  return true;
+}
+
 void Radio::handle_watch(Bank &b) {
   double req;
+  int req_rate;
   {
     std::lock_guard<std::mutex> l(_m);
     req = _req_hz;
+    req_rate = _req_rate;
   }
-  // ignore banks from before the retune
-  if (std::fabs(b.centre_hz + b.shift_hz - req) > 1e3) return;
+  // ignore banks from before the retune (or the rate change of a fallback)
+  if (std::fabs(b.centre_hz + b.shift_hz - req) > 1e3 || b.fs != wsdr::Receiver::rate_of(req_rate)) return;
   if (!_fe || b.fs != _fe_fs || b.shift_hz != _fe_shift) {
     _fe = std::make_shared<FrontEnd>(b.fs, b.shift_hz, _frames);
     _fe_fs = b.fs;
@@ -347,6 +377,7 @@ void Radio::handle_watch(Bank &b) {
     std::string why;
     if (_rx) why = _rx->status().last_fault;
     KP_LOGW("radio: stream restarted (gen %u, %s), decoder keeps going", b.gen, why.c_str());
+    if (watch_fault(req)) return;
   }
   _fe_gen = b.gen;
   unpack(b, _iq);
@@ -625,7 +656,9 @@ std::string Radio::status_json() {
     << ",\"mode\":\"" << modes[static_cast<int>(_mode)] << "\",\"freq_hz\":" << _req_hz
     << ",\"watch_hz\":" << _watch_hz << ",\"fs\":" << rs.fs << ",\"banks\":" << _banks.load()
     << ",\"dropped\":" << _dropped.load() << ",\"decode_dropped\":" << _ddropped.load()
-    << ",\"restarts\":" << rs.restarts << ",\"dsp_load\":" << _load << ",\"decode_load\":" << _dload;
+    << ",\"restarts\":" << rs.restarts << ",\"dsp_load\":" << _load << ",\"decode_load\":" << _dload
+    << ",\"watch_msps\":" << (_mode == Mode::Watch ? wsdr::Receiver::rate_of(_req_rate) / 1e6 : 0)
+    << ",\"fallback\":" << (_fallback ? "true" : "false");
   if (_mode == Mode::Scan) o << ",\"scan_step\":" << _step << ",\"scan_steps\":" << _plan.size();
   o << ",\"video\":{\"locked\":" << (!_vstats.acquiring && _vstats.lock_recent > 0.5f ? "true" : "false")
     << ",\"lock\":" << _vstats.lock_recent << ",\"std\":" << jstr(_vstats.std_name) << ",\"fps\":" << _fps

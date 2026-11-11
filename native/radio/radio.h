@@ -51,6 +51,7 @@ public:
   void stream_test(int rate_sel, double seconds);
   void idle();
   // Debug: the rate watch uses (1 = 40 MS/s, the default; 2 = 20 MS/s); takes effect on the next watch().
+  // Also clears a 20 MS/s fallback.
   void set_watch_rate(int rate_sel);
   // Debug: gain for the next tune: < 0 = the chip's AGC, else fixed gain in dB (CCA off, IGI pinned).
   void set_gain(double db);
@@ -73,6 +74,7 @@ private:
   void on_bank(const uint8_t *b, size_t n, uint64_t seq, uint32_t gen, double fs, double centre, double shift);
   void tune(double hz, int rate_sel);
   void handle_watch(Bank &b);
+  bool watch_fault(double hz);
   void record_bank(const Bank &b);
   void handle_scan(Bank &b);
   void handle_test(Bank &b);
@@ -87,6 +89,7 @@ private:
   double _watch_hz = 0, _req_hz = 0;
   int _req_rate = 1;
   int _watch_rate = 1;
+  bool _fallback = false;  // 40 MS/s kept faulting during a watch: watch at 20 MS/s until open() / set_watch_rate()
   double _gain_db = -1;
   // recording (DSP thread writes; the request is under _m)
   double _rec_req_s = 0;
@@ -127,6 +130,7 @@ private:
   uint64_t _epoch_seen = ~0ull;
   std::shared_ptr<FrontEnd> _fe;
   uint32_t _fe_gen = ~0u;
+  std::deque<int64_t> _watch_faults;  // ms of the stream restarts seen in this watch at 40 MS/s
   double _fe_fs = 0, _fe_shift = 0;
   std::vector<cf> _iq;
   // scan
