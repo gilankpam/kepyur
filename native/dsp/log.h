@@ -8,7 +8,12 @@ enum class LogLevel { Debug, Info, Warn, Error };
 using LogSink = void (*)(LogLevel, const char *line);
 void set_log_sink(LogSink s);
 void set_log_debug(bool on);
-void logf(LogLevel l, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+#if defined(__MINGW32__)
+#define KP_PRINTF gnu_printf  // UCRT handles %zu; the default ms_printf check would not know it
+#else
+#define KP_PRINTF printf
+#endif
+void logf(LogLevel l, const char *fmt, ...) __attribute__((format(KP_PRINTF, 2, 3)));
 }  // namespace kp
 
 #define KP_LOGD(...) ::kp::logf(::kp::LogLevel::Debug, __VA_ARGS__)

@@ -17,6 +17,11 @@
 #include "spectrum.h"
 #include "video.h"
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 using namespace kp;
 
 static double json_number(const std::string &txt, const char *key) {
@@ -50,6 +55,9 @@ int main(int argc, char **argv) {
     }
   }
   if (file.empty()) return 2;
+#ifdef _WIN32
+  if (frames) _setmode(_fileno(stdout), _O_BINARY);  // raw frames: no CRLF translation
+#endif
   double centre = NAN;
   {
     const auto dot = file.rfind('.');

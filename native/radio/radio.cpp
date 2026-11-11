@@ -12,8 +12,12 @@
 #include "spectrum.h"
 #include "stream88xx.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/resource.h>
 #include <unistd.h>
+#endif
 
 namespace kp {
 
@@ -33,9 +37,14 @@ constexpr int kSettleBanks = 40;     // ~8 ms after a retune (chip AGC)
 // Raise this thread's priority (the USB stream thread must never miss a chip deadline; the DSP thread
 // must keep up). Best effort: logs what the OS allowed.
 void boost_thread(const char *what) {
+#ifdef _WIN32
+  const bool ok = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) != 0;
+  KP_LOGI("radio: %s thread %lu priority highest: %s", what, GetCurrentThreadId(), ok ? "ok" : "refused");
+#else
   const int tid = static_cast<int>(gettid());
   const int rc = setpriority(PRIO_PROCESS, tid, -10);
   KP_LOGI("radio: %s thread %d nice -10: %s", what, tid, rc == 0 ? "ok" : "refused");
+#endif
 }
 
 std::vector<double> scan_plan() {
@@ -70,6 +79,11 @@ void Radio::open(int fd) {
   s.rate_sel = 1;  // 40 MS/s
   s.wide = true;
   s.agc = true;
+#ifdef _WIN32
+  // Windows' USB stack stalls the bulk-IN pipe now and then for 0.1-0.7 ms (DPC latency): a 40 MS/s bank
+  // then ships past its deadline. Keep it (a few damaged samples) rather than restart the stream (~120 ms).
+  s.soft_deadline = true;
+#endif
   KP_LOGI("radio: opening adapter (%s)", fd >= 0 ? "Android fd" : "bus scan");
   rx->open(wsdr::kPid8812bu, s, -1, {}, fd);
   const auto caps = rx->caps();
@@ -319,10 +333,12 @@ void Radio::dsp_loop() {
       _busy_s = 0;
       _load_t0_ms = t;
       if (++_status_ticks % 5 == 0 && _mode == Mode::Watch)
-        KP_LOGI("status: watch %.1f MHz, cpu demod %.0f%% decode %.0f%%, dropped usb %llu decode %llu, restarts %llu, "
+        KP_LOGI("status: watch %.1f MHz, cpu demod %.0f%% decode %.0f%%, dropped usb %llu decode %llu, restarts %llu, late %llu damaged %llu, "
                 "%s %s lock %.2f fps %.0f, acq %llu lost %llu rephase %llu", _watch_hz / 1e6, _load * 100, _dload * 100,
                 (unsigned long long)_dropped.load(), (unsigned long long)_ddropped.load(),
-                (unsigned long long)(_rx ? _rx->status().restarts : 0), _vstats.std_name,
+                (unsigned long long)(_rx ? _rx->status().restarts : 0),
+                (unsigned long long)(_rx ? _rx->status().late_banks : 0),
+                (unsigned long long)(_rx ? _rx->status().damaged_banks : 0), _vstats.std_name,
                 _vstats.colour ? "colour" : "grey", _vstats.lock_recent, _fps,
                 (unsigned long long)_vstats.acquisitions, (unsigned long long)_vstats.losses,
                 (unsigned long long)_vstats.rephases);
@@ -592,7 +608,9 @@ void Radio::handle_test(Bank &b) {
   o << "{\"rate_msps\":" << b.fs / 1e6 << ",\"seconds\":" << el << ",\"banks\":" << _test_banks
     << ",\"expected\":" << static_cast<uint64_t>(expect) << ",\"seq_gaps\":" << _test_gaps
     << ",\"stream_runs\":" << _test_runs
-    << ",\"restarts\":" << _rx->status().restarts << ",\"queue_dropped\":" << _dropped.load()
+    << ",\"restarts\":" << _rx->status().restarts << ",\"late_banks\":" << _rx->status().late_banks
+    << ",\"damaged_banks\":" << _rx->status().damaged_banks
+    << ",\"queue_dropped\":" << _dropped.load()
     << ",\"done\":" << (el * 1000 >= _test_end_ms ? "true" : "false") << "}";
   std::lock_guard<std::mutex> l(_m);
   _test_result = o.str();
@@ -625,7 +643,7 @@ std::string Radio::status_json() {
     << ",\"mode\":\"" << modes[static_cast<int>(_mode)] << "\",\"freq_hz\":" << _req_hz
     << ",\"watch_hz\":" << _watch_hz << ",\"fs\":" << rs.fs << ",\"banks\":" << _banks.load()
     << ",\"dropped\":" << _dropped.load() << ",\"decode_dropped\":" << _ddropped.load()
-    << ",\"restarts\":" << rs.restarts << ",\"dsp_load\":" << _load << ",\"decode_load\":" << _dload;
+    << ",\"restarts\":" << rs.restarts << ",\"late_banks\":" << rs.late_banks << ",\"damaged_banks\":" << rs.damaged_banks << ",\"dsp_load\":" << _load << ",\"decode_load\":" << _dload;
   if (_mode == Mode::Scan) o << ",\"scan_step\":" << _step << ",\"scan_steps\":" << _plan.size();
   o << ",\"video\":{\"locked\":" << (!_vstats.acquiring && _vstats.lock_recent > 0.5f ? "true" : "false")
     << ",\"lock\":" << _vstats.lock_recent << ",\"std\":" << jstr(_vstats.std_name) << ",\"fps\":" << _fps

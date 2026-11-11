@@ -144,7 +144,7 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------------------------------- USB
     private fun ours(d: UsbDevice) =
-        (d.vendorId == 0x2357 && d.productId == 0x0115) || (d.vendorId == 0x0bda && d.productId == 0xb812)
+        (d.vendorId == 0x2357 && d.productId in intArrayOf(0x0115, 0x012d, 0x0138)) || (d.vendorId == 0x0bda && d.productId == 0xb812)
 
     private fun connect() {
         if (state == State.OPENING || state == State.RUNNING) return

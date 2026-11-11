@@ -31,6 +31,37 @@ scripts/build-desktop.sh      # build/desktop/kp_replay, kp_live, kp_sim
 scripts/build-android.sh      # android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### Windows (desktop tools)
+
+`kp_replay`, `kp_live` and `kp_sim` also build natively on Windows with MSYS2:
+
+1. Install MSYS2 (`winget install MSYS2.MSYS2`), then in an MSYS2 UCRT64 shell:
+   ```sh
+   pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,libusb,pkgconf} vim make texinfo bison flex
+   ```
+2. mipsel binutils (MSYS2 has no package; wifi-sdr assembles the adapter's on-chip streamer with it):
+   ```sh
+   curl -LO https://ftp.gnu.org/gnu/binutils/binutils-2.44.tar.xz && tar xf binutils-2.44.tar.xz
+   mkdir b && cd b && ../binutils-2.44/configure --target=mipsel-linux-gnu --prefix=/opt/mipsel \
+     --disable-nls --disable-werror --disable-gdb --disable-gprof --disable-gprofng --disable-sim
+   make -j8 && make install
+   ```
+3. Bind **WinUSB** to the adapter with [Zadig](https://zadig.akeo.ie) (Options → List All Devices). It
+   then no longer works as a Wi-Fi card on that PC.
+4. `scripts/build-windows.sh` (Git Bash or MSYS2) → `build/windows/*.exe` with the DLLs they need.
+
+`kp_live` switches a cold-plugged 8812BU to USB 3 itself (Windows has no rtw88 to do it); `--no-usb3`
+skips that. Watching runs at 40 MS/s (`--watch-rate 2` for 20 MS/s). Windows' USB stack stalls now and
+then, so there the stream keeps banks that ship late or come back short (`late_banks` / `damaged_banks` in
+the status) instead of restarting, and posts 2048 transfers. Expect a restart every ~10 s. Use a USB 3 port, not a hub. Video (cmd, Git Bash or PowerShell 7.4+; Windows PowerShell 5.1
+corrupts binary pipes):
+
+```bat
+scripts\kp-live.cmd --scan           :: scan, watch the strongest pilot (ffplay window; log: build\windows\kp_live.log)
+scripts\kp-live.cmd --watch 5848     :: straight to one frequency (MHz)
+build\windows\kp_live.exe --scan --frames | ffplay -f rawvideo -pixel_format rgb0 -video_size 720x480 -framerate 60 -fflags nobuffer -i -
+```
+
 ## On the phone
 
 The adapter takes the USB-C port, so adb runs over Wi-Fi (Developer options → Wireless debugging):
