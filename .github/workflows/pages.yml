@@ -37,6 +37,15 @@ jobs:
           git -C third_party/wifi-sdr submodule update --init external/devourer
 
       - uses: cachix/install-nix-action@v31
+      # the Nix store between runs: the mipsel cross binutils are not in cache.nixos.org (built from source)
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
+        with:
+          use-flakehub: false
+      # emscripten's system libraries (libc, libc++ with threads, wasm exceptions, SIMD), built on first use
+      - uses: actions/cache@v4
+        with:
+          path: build/web/emcache
+          key: emcache-${{ hashFiles('shell.nix', 'web/CMakeLists.txt') }}
 
       # the web shell: emscripten, Node, cmake, mipsel binutils (no Android SDK/NDK)
       - name: Build

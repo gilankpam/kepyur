@@ -24,7 +24,9 @@ let
   };
   sdk = android.androidsdk;
   # wifi-sdr assembles the 8812BU's on-chip streamer (MIPS16e2) at build time and embeds it with xxd
-  mips = pkgs.pkgsCross.mipsel-linux-gnu.buildPackages.binutils;
+  # unwrapped: only as / ld / objcopy on freestanding code. The wrapper pulls in a cross GCC + glibc for mipsel
+  # that cache.nixos.org does not have (CI compiled a whole toolchain on every run).
+  mips = pkgs.pkgsCross.mipsel-linux-gnu.buildPackages.binutils-unwrapped;
   # the web version: emscripten 4.0.12 (WebAssembly, JSPI, pthreads) and Node for its local server
   webTools = [ pkgs.emscripten pkgs.nodejs ];
   common = [ pkgs.cmake pkgs.ninja pkgs.pkg-config mips pkgs.xxd ];
