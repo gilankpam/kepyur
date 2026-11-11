@@ -9,6 +9,22 @@ The latest APK from `main` is the rolling **main** pre-release (tag `main-latest
 (`.github/workflows/android.yml`) on every push to `main`. It is a debug build signed with CI's key: if a
 locally built kepyur is installed, uninstall it first (`adb uninstall com.kepyur.app`).
 
+## Web version
+
+**https://gilankpam.github.io/kepyur/** — the same receiver in Chrome or Edge on a computer (Windows, macOS,
+Linux): plug the T4U in, click Connect, fly with the monitor as the video receiver. It is the app's own decoder
+compiled to WebAssembly, talking to the adapter over WebUSB, and it watches at 20 MS/s (what WebUSB can carry).
+Rebuilt by CI (`.github/workflows/pages.yml`) on every push to `main`. Firefox and Safari have no WebUSB.
+
+- **Windows:** swap the adapter's driver for WinUSB once with [Zadig](https://zadig.akeo.ie/) (Options → List All
+  Devices → "802.11ac NIC", USB ID 2357 0115 → WinUSB → Replace Driver). The page has the same steps under
+  "First time on Windows?". Untested so far: reports welcome (open the page with `?debug` and use Copy report).
+- **Linux:** keep `rtw88_8822bu` off the card and give your user access (a udev rule for 2357:0115).
+- **macOS:** nothing to set up.
+
+On screen: the OSD pill (channel, frequency, SNR, decode → screen latency) can be dragged, ✕ / **O** hides it;
+⚙ (top right) has Channels and Scan; full screen bottom right or **F**.
+
 ## Layout
 
 - `native/dsp/` — video decoder (FM discriminator, sync, fields), spectrum + pilot finding. No hardware.
@@ -16,7 +32,8 @@ locally built kepyur is installed, uninstall it first (`adb uninstall com.kepyur
 - `native/jni/` — the app's native side; frames go straight to the video Surface.
 - `native/tools/` — desktop: `kp_replay` (recordings), `kp_live` (adapter on this PC), `kp_sim` (kp_live
   against a recording played back as a tunable adapter).
-- `android/` — the app (Kotlin, plain Views). `scripts/` — build and phone helpers.
+- `android/` — the app (Kotlin, plain Views). `web/` — the web version (`kepyur_web.cpp` + `site/`).
+  `scripts/` — build and phone helpers.
 
 ## Build
 
@@ -29,6 +46,7 @@ git -C third_party/wifi-sdr submodule update --init external/devourer
 nix-shell
 scripts/build-desktop.sh      # build/desktop/kp_replay, kp_live, kp_sim
 scripts/build-android.sh      # android/app/build/outputs/apk/debug/app-debug.apk
+scripts/build-web.sh          # build/web/site; serve it with: node web/serve.mjs (http://localhost:8080)
 ```
 
 ## On the phone

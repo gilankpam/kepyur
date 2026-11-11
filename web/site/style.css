@@ -1,0 +1,109 @@
+:root {
+  color-scheme: dark;
+  --text: #e8eaed;
+  --dim: #9aa0a6;
+  --glass: rgba(32, 33, 36, 0.78);
+  --line: rgba(255, 255, 255, 0.14);
+  --panel: #292a2d;
+  --accent: #8ab4f8;
+  --good: #81c995;
+  --mid: #fdd663;
+  --bad: #f28b82;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--text); overflow: hidden; }
+button { font: inherit; color: inherit; }
+a { color: var(--accent); }
+code { font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; background: rgba(255,255,255,.08); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+
+#stage { position: fixed; inset: 0; background: #000; user-select: none; }
+/* The picture is 4:3 whatever the frame's pixel size (720x480 NTSC, 720x576 PAL: non-square pixels). */
+#video {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(100vw, calc(100vh * 4 / 3)); height: min(100vh, calc(100vw * 3 / 4));
+  background: #000;
+}
+
+#nopic { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; padding: 6px 14px;
+  border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: var(--mid); font-weight: 600; letter-spacing: 0.04em; }
+#stage.stale #video { filter: brightness(0.45) grayscale(0.6); }
+
+.glass { background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); }
+.dim { color: var(--dim); }
+.small { font-size: 12px; }
+
+/* OSD pill: drag it from anywhere but the ✕ */
+#osd {
+  position: absolute; left: 12px; top: 12px; z-index: 2;
+  display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  border-radius: 999px; padding: 4px 6px 4px 12px; cursor: grab;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4); font-variant-numeric: tabular-nums; touch-action: none;
+}
+#osd.dragging { cursor: grabbing; }
+#osd .ch { font-weight: 700; color: #fff; }
+#osd .sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.18); }
+#osd button { all: unset; cursor: pointer; width: 20px; height: 20px; display: inline-grid; place-items: center;
+  border-radius: 4px; color: #bdc1c6; font-size: 12px; }
+#osd button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.good { color: var(--good); } .mid { color: var(--mid); } .bad { color: var(--bad); }
+#osd-show { position: absolute; left: 10px; bottom: 10px; z-index: 2; border-radius: 999px; padding: 4px 10px;
+  font-weight: 600; font-size: 11px; color: #fff; cursor: pointer; }
+
+/* corner buttons: dim when the mouse is still */
+.corner { position: absolute; right: 12px; top: 12px; z-index: 2; width: 36px; height: 36px; display: grid;
+  place-items: center; border-radius: 50%; cursor: pointer; opacity: 0.9; transition: opacity 0.4s; }
+.corner:hover { background: rgba(60, 64, 67, 0.9); opacity: 1; }
+.corner.br { top: auto; bottom: 12px; }
+#stage.idle .corner { opacity: 0.3; }
+#stage.idle.watching { cursor: none; }
+
+/* panels and dialogs */
+.panel, .dialog { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); }
+#card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 32px));
+  padding: 22px 24px 18px; text-align: center; z-index: 3; }
+#card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 0.02em; }
+#card .lead { margin: 0 0 14px; }
+#card .actions { display: flex; gap: 8px; justify-content: center; margin: 4px 0 12px; }
+#card .small { margin: 0; }
+button.primary { border: 0; background: var(--accent); color: #202124; font-weight: 600; padding: 7px 18px;
+  border-radius: 999px; cursor: pointer; }
+button.primary:hover { background: #aecbfa; }
+button.primary:disabled { opacity: 0.5; cursor: default; }
+.progress { position: relative; height: 18px; background: rgba(255, 255, 255, 0.06); border-radius: 4px;
+  overflow: hidden; margin: 0 0 10px; }
+.progress div { height: 100%; width: 0; background: rgba(138, 180, 248, 0.35); transition: width 0.3s; }
+.progress span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; }
+
+.backdrop { position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, 0.45); display: grid;
+  place-items: center; padding: 16px; }
+.dialog { width: min(420px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.dialog.wide { width: min(560px, 100%); }
+.dialog-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 10px 10px 16px;
+  font-weight: 600; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.dialog-body { padding: 12px 16px 14px; overflow: auto; user-select: text; }
+button.x { all: unset; cursor: pointer; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 4px;
+  color: #bdc1c6; }
+button.x:hover { background: rgba(255, 255, 255, 0.1); }
+.section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.section-head h2 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--dim); }
+.section-head button.primary { padding: 5px 14px; }
+#pilots .row { display: grid; grid-template-columns: 34px 1fr auto 62px; gap: 10px; align-items: center;
+  padding: 7px 8px; border-radius: 6px; cursor: pointer; font-variant-numeric: tabular-nums; }
+#pilots .row:hover { background: rgba(255, 255, 255, 0.06); }
+#pilots .row.on { background: rgba(138, 180, 248, 0.16); }
+#pilots .row b { color: #fff; }
+#pilots .tag { font-size: 11px; color: var(--accent); text-align: right; }
+#pilots-note { margin: 8px 0 0; }
+.guide ol { padding-left: 20px; } .guide li { margin: 4px 0; } .guide h3 { margin: 14px 0 4px; font-size: 13px; }
+
+/* ?debug */
+#debug { position: absolute; right: 60px; bottom: 12px; z-index: 3; width: min(520px, calc(100vw - 80px));
+  max-height: 45vh; overflow: auto; padding: 8px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.78);
+  border: 1px solid var(--line); font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; user-select: text; }
+#debug pre { margin: 0; white-space: pre-wrap; }
+#debug .log { color: #9a9; margin-top: 6px; max-height: 18vh; overflow: auto; }
+#debug button { font: inherit; margin: 0 4px 4px 0; }
