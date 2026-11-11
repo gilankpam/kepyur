@@ -32,6 +32,8 @@ constexpr int kSettleBanks = 40;     // ~8 ms after a retune (chip AGC)
 // A watch at 40 MS/s that restarts this often falls back to 20 MS/s (same picture: the BW20 RX filter is
 // +-10 MHz either way). A link that cannot carry 40 MS/s restarts every 0.2-0.3 s (Chrome's WebUSB: ~14k
 // transfers/s against the 24.4k needed); a healthy one runs minutes without one.
+constexpr int64_t kSnrEveryMs = 500;  // live SNR while watching (~2 % of a core at 20 MS/s)
+constexpr double kSnrSpan = 8e6;      // +- span the BW20 RX filter passes flat (-3 dB at ~9.2 MHz)
 constexpr int kFallbackFaults = 3;
 constexpr int64_t kFallbackWindowMs = 5000;
 
@@ -177,9 +179,9 @@ void Radio::tune(double hz, int rate_sel) {
   _req_rate = rate_sel;
 }
 
-void Radio::scan() {
+void Radio::scan(double prefer_hz) {
   std::lock_guard<std::mutex> l(_m);
-  _resume_hz = _mode == Mode::Watch ? _watch_hz : 0;
+  _resume_hz = prefer_hz > 0 ? prefer_hz : _mode == Mode::Watch ? _watch_hz : 0;
   _mode = Mode::Scan;
   _mode_epoch++;
 }
@@ -285,6 +287,12 @@ void Radio::dsp_loop() {
         }
         KP_LOGI("radio: watch %.3f MHz at %.0f MS/s", hz / 1e6, wsdr::Receiver::rate_of(rate) / 1e6);
         _watch_faults.clear();
+        _snr_psd.reset();
+        _snr_t_ms = 0;
+        {
+          std::lock_guard<std::mutex> l(_m);
+          _snr_db = -1;
+        }
         tune(hz, rate);
       } else if (mode == Mode::Scan) {
         _plan = scan_plan();
@@ -358,6 +366,23 @@ bool Radio::watch_fault(double hz) {
   return true;
 }
 
+void Radio::measure_snr(const std::vector<cf> &iq, double fs) {
+  if (!_snr_psd) {
+    if (now_ms() - _snr_t_ms < kSnrEveryMs) return;
+    _snr_psd = std::make_unique<Psd>(1024);
+    _snr_have = 0;
+    _snr_need = static_cast<size_t>(kPsdSpan * fs);
+  }
+  _snr_psd->add(iq.data(), iq.size());
+  _snr_have += iq.size();
+  if (_snr_have < _snr_need) return;
+  const float snr = carrier_snr(_snr_psd->db(), fs, std::min(kSnrSpan, 0.4 * fs));
+  _snr_psd.reset();
+  _snr_t_ms = now_ms();
+  std::lock_guard<std::mutex> l(_m);
+  _snr_db = snr;
+}
+
 void Radio::handle_watch(Bank &b) {
   double req;
   int req_rate;
@@ -381,6 +406,7 @@ void Radio::handle_watch(Bank &b) {
   }
   _fe_gen = b.gen;
   unpack(b, _iq);
+  measure_snr(_iq, b.fs);
   record_bank(b);
   std::vector<float> d;
   {
@@ -659,6 +685,7 @@ std::string Radio::status_json() {
     << ",\"restarts\":" << rs.restarts << ",\"dsp_load\":" << _load << ",\"decode_load\":" << _dload
     << ",\"watch_msps\":" << (_mode == Mode::Watch ? wsdr::Receiver::rate_of(_req_rate) / 1e6 : 0)
     << ",\"fallback\":" << (_fallback ? "true" : "false");
+  if (_mode == Mode::Watch && _snr_db >= 0) o << ",\"snr_db\":" << _snr_db;
   if (_mode == Mode::Scan) o << ",\"scan_step\":" << _step << ",\"scan_steps\":" << _plan.size();
   o << ",\"video\":{\"locked\":" << (!_vstats.acquiring && _vstats.lock_recent > 0.5f ? "true" : "false")
     << ",\"lock\":" << _vstats.lock_recent << ",\"std\":" << jstr(_vstats.std_name) << ",\"fps\":" << _fps

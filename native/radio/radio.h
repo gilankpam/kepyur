@@ -46,7 +46,9 @@ public:
   bool is_open() const;
   bool superspeed() const;
 
-  void scan();                 // then watch the previous pilot again, or the strongest found
+  // Then watch prefer_hz if found (or, with nothing found, anyway), else the previous pilot again, else the
+  // strongest found. prefer_hz 0: the pilot being watched.
+  void scan(double prefer_hz = 0);
   void watch(double hz);
   void stream_test(int rate_sel, double seconds);
   void idle();
@@ -75,6 +77,7 @@ private:
   void tune(double hz, int rate_sel);
   void handle_watch(Bank &b);
   bool watch_fault(double hz);
+  void measure_snr(const std::vector<cf> &iq, double fs);
   void record_bank(const Bank &b);
   void handle_scan(Bank &b);
   void handle_test(Bank &b);
@@ -131,6 +134,11 @@ private:
   std::shared_ptr<FrontEnd> _fe;
   uint32_t _fe_gen = ~0u;
   std::deque<int64_t> _watch_faults;  // ms of the stream restarts seen in this watch at 40 MS/s
+  // live SNR of the watched carrier: a spectrum of kPsdSpan of IQ every kSnrEveryMs
+  std::unique_ptr<Psd> _snr_psd;
+  size_t _snr_have = 0, _snr_need = 0;
+  int64_t _snr_t_ms = 0;
+  float _snr_db = -1;  // < 0: none yet (under _m)
   double _fe_fs = 0, _fe_shift = 0;
   std::vector<cf> _iq;
   // scan

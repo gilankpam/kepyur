@@ -61,11 +61,11 @@ std::vector<float> Psd::db() const {
   return out;
 }
 
-std::vector<Hump> find_humps(const std::vector<float> &db, double fs, double edge_hz) {
+namespace {
+// Median-smoothed spectrum: kills the DC line and narrow carriers (~0.6 MHz window).
+std::vector<float> smooth_db(const std::vector<float> &db, double bin) {
   const int n = static_cast<int>(db.size());
-  const double bin = fs / n;
-  // median-smooth (kills the DC line and narrow carriers), then floor = median of the smoothed spectrum
-  const int hw = std::max(2, static_cast<int>(0.3e6 / bin));  // ~0.6 MHz window
+  const int hw = std::max(2, static_cast<int>(0.3e6 / bin));
   std::vector<float> sm(n), win;
   for (int i = 0; i < n; i++) {
     win.clear();
@@ -73,6 +73,15 @@ std::vector<Hump> find_humps(const std::vector<float> &db, double fs, double edg
     std::nth_element(win.begin(), win.begin() + win.size() / 2, win.end());
     sm[i] = win[win.size() / 2];
   }
+  return sm;
+}
+}  // namespace
+
+std::vector<Hump> find_humps(const std::vector<float> &db, double fs, double edge_hz) {
+  const int n = static_cast<int>(db.size());
+  const double bin = fs / n;
+  // median-smooth, then floor = lower quartile of the smoothed spectrum
+  const std::vector<float> sm = smooth_db(db, bin);
   std::vector<float> sorted = sm;
   std::nth_element(sorted.begin(), sorted.begin() + n / 4, sorted.end());
   const float floor = sorted[n / 4];  // lower quartile: robust even when a wide signal fills much of the span
@@ -102,6 +111,22 @@ std::vector<Hump> find_humps(const std::vector<float> &db, double fs, double edg
     i = j;
   }
   return out;
+}
+
+float carrier_snr(const std::vector<float> &db, double fs, double span_hz) {
+  const int n = static_cast<int>(db.size());
+  const double bin = fs / n;
+  const std::vector<float> sm = smooth_db(db, bin);
+  std::vector<float> in;
+  float pk = -1e9f;
+  for (int i = 0; i < n; i++) {
+    if (std::fabs((i - n / 2) * bin) > span_hz) continue;
+    in.push_back(sm[i]);
+    pk = std::max(pk, sm[i]);
+  }
+  if (in.empty()) return 0;
+  std::nth_element(in.begin(), in.begin() + in.size() / 10, in.end());
+  return pk - in[in.size() / 10];
 }
 
 VideoCheck check_video(const cf *x, size_t n, double fs, double offset_hz) {
