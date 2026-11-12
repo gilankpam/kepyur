@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kepyur</title>
-<meta name="description" content="Analog FPV video receiver in the browser: a TP-Link Archer T4U v3 over WebUSB.">
+<meta name="description" content="Analog FPV video receiver in the browser: a TP-Link Archer T4U v3, T3U or T3U Plus over WebUSB.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <!-- GitHub Pages cannot send COOP/COEP; this adds them (the first visit reloads once). Must load first. -->
 <script src="coi-serviceworker.js"></script>
@@ -41,7 +41,7 @@
       <button id="connect" class="primary">Connect</button>
       <button id="rescan" class="primary" hidden>Scan again</button>
     </div>
-    <p class="small dim" id="card-help">Plug in your TP-Link Archer T4U v3, then click Connect.
+    <p class="small dim" id="card-help">Plug in your TP-Link Archer T4U v3, T3U or T3U Plus, then click Connect.
       <a href="#" id="guide-link">First time on Windows?</a></p>
   </div>
 
@@ -66,22 +66,23 @@
       <div class="dialog-head"><span id="guide-title">Set up the adapter (once)</span><button class="x" data-close aria-label="Close">✕</button></div>
       <div class="dialog-body guide">
         <p>A browser can only use a USB device that has Microsoft's generic <b>WinUSB</b> driver. Windows gives the
-          T4U its Wi-Fi driver, so swap it once with <b>Zadig</b>:</p>
+          adapter its Wi-Fi driver, so swap it once with <b>Zadig</b>:</p>
         <ol>
-          <li>Plug in the T4U and download <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>.</li>
+          <li>Plug in the adapter and download <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>.</li>
           <li>Run it and turn on <b>Options → List All Devices</b>.</li>
-          <li>Pick <b>802.11ac NIC</b> from the list. Check that the USB ID reads <b>2357 0115</b>.</li>
+          <li>Pick the adapter from the list (the T4U v3 shows as <b>802.11ac NIC</b>). Check that the USB ID reads
+            <b>2357 0115</b> (T4U v3), <b>2357 012D</b> (T3U) or <b>2357 0138</b> (T3U Plus).</li>
           <li>Choose <b>WinUSB</b> as the target driver and click <b>Replace Driver</b> (or Install Driver).</li>
           <li>Come back here and click <b>Connect</b>. Close other programs that use the adapter first.</li>
         </ol>
-        <p class="small dim">After this the T4U no longer works as a normal Wi-Fi adapter on this PC. To undo it, open
+        <p class="small dim">After this the adapter no longer works as a normal Wi-Fi adapter on this PC. To undo it, open
           Device Manager, uninstall the device (with its driver) and replug it. OpenIPC's
           <a href="https://docs.openipc.org/use-cases/fpv/net-cards/rtl8812au/" target="_blank" rel="noopener">adapter notes</a>
           show the same Zadig steps for other Realtek adapters.</p>
         <h3>Linux</h3>
         <p class="small">Keep the kernel driver off the card and let your user open it:
           <code>sudo modprobe -r rtw88_8822bu</code> (or blacklist <code>rtw88_8822bu</code>), and a udev rule such as
-          <code>SUBSYSTEM=="usb", ATTR{idVendor}=="2357", ATTR{idProduct}=="0115", MODE="0666"</code>.</p>
+          <code>SUBSYSTEM=="usb", ATTR{idVendor}=="2357", ATTR{idProduct}=="0115|012d|0138", MODE="0666"</code>.</p>
         <h3>macOS</h3>
         <p class="small">Nothing to set up.</p>
       </div>

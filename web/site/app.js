@@ -4,7 +4,8 @@ import { BUILD } from './build.js';
 
 const $ = (id) => document.getElementById(id);
 const DEBUG = new URLSearchParams(location.search).has('debug');
-const ADAPTERS = [{ vendorId: 0x2357, productId: 0x0115 }, { vendorId: 0x0bda, productId: 0xb812 }]; // T4U v3, 8812BU
+const ADAPTERS = [0x0115, 0x012d, 0x0138].map((productId) => ({ vendorId: 0x2357, productId })) // T4U v3, T3U, T3U Plus
+  .concat({ vendorId: 0x0bda, productId: 0xb812 }); // 8812BU
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const now = () => performance.timeOrigin + performance.now(); // epoch ms, the clock the wasm side stamps with
 
@@ -168,7 +169,7 @@ async function connect(fromClick) {
       } catch (e) {
         if (e.name === 'NotFoundError') {
           phase = 'start';
-          return card('No adapter chosen. Plug in the T4U and click Connect.', { connect: true });
+          return card('No adapter chosen. Plug in the adapter and click Connect.', { connect: true });
         }
         throw e;
       }

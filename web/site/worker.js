@@ -18,7 +18,7 @@ self.onmessage = ({ data }) => (mod ? handle(data) : queue.push(data));
 // The stream's bulk-IN reader (wifi-sdr src/bulkin_js.h has the contract): `depth` transferIn() on EP 4 always in
 // flight; each completion goes to the next ring slot in the wasm heap, flagged with an atomic the stream thread
 // waits on, and the next transferIn is submitted at once.
-const ADAPTERS = [[0x2357, 0x0115], [0x0bda, 0xb812]];
+const ADAPTERS = [[0x2357, 0x0115], [0x2357, 0x012d], [0x2357, 0x0138], [0x0bda, 0xb812]];
 const bulk = { gen: 0, inflight: 0, M: null };
 const openedAdapter = async () =>
   (await navigator.usb.getDevices()).find((d) => d.opened && ADAPTERS.some(([v, p]) => d.vendorId === v && d.productId === p));

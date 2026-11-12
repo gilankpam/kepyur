@@ -5,6 +5,9 @@ streams 40 MS/s raw IQ through [wifi-sdr](https://github.com/snokvist/wifi-sdr) 
 `gilankpam/wifi-sdr`, branch `kepyur-android`) and [devourer](https://github.com/OpenIPC/devourer); kepyur
 scans the 5.8 GHz bands for analog video, lists the pilots, and decodes the picked one in colour (NTSC and PAL; grey when the colour burst is too weak).
 
+The TP-Link Archer T3U (`2357:012d`) and T3U Plus (`2357:0138`) carry the same chip and should work the same
+way, but are untested so far: reports welcome.
+
 The latest APK from `main` is the rolling **main** pre-release (tag `main-latest`), rebuilt by CI
 (`.github/workflows/android.yml`) on every push to `main`. It is a debug build signed with CI's key: if a
 locally built kepyur is installed, uninstall it first (`adb uninstall com.kepyur.app`).
@@ -12,14 +15,14 @@ locally built kepyur is installed, uninstall it first (`adb uninstall com.kepyur
 ## Web version
 
 **https://gilankpam.github.io/kepyur/** — the same receiver in Chrome or Edge on a computer (Windows, macOS,
-Linux): plug the T4U in, click Connect, fly with the monitor as the video receiver. It is the app's own decoder
+Linux): plug the adapter in, click Connect, fly with the monitor as the video receiver. It is the app's own decoder
 compiled to WebAssembly, talking to the adapter over WebUSB, and it watches at 20 MS/s (what WebUSB can carry).
 Rebuilt by CI (`.github/workflows/pages.yml`) on every push to `main`. Firefox and Safari have no WebUSB.
 
 - **Windows:** swap the adapter's driver for WinUSB once with [Zadig](https://zadig.akeo.ie/) (Options → List All
-  Devices → "802.11ac NIC", USB ID 2357 0115 → WinUSB → Replace Driver). The page has the same steps under
+  Devices → the adapter, e.g. "802.11ac NIC" with USB ID 2357 0115 → WinUSB → Replace Driver). The page has the same steps under
   "First time on Windows?". Untested so far: reports welcome (open the page with `?debug` and use Copy report).
-- **Linux:** keep `rtw88_8822bu` off the card and give your user access (a udev rule for 2357:0115).
+- **Linux:** keep `rtw88_8822bu` off the card and give your user access (a udev rule for its USB ID).
 - **macOS:** nothing to set up.
 
 On screen: the OSD pill (channel, frequency, SNR, decode → screen latency) can be dragged, ✕ / **O** hides it;

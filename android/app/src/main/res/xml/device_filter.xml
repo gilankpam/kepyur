@@ -2,6 +2,10 @@
 <resources>
     <!-- TP-Link Archer T4U v3 (RTL8812BU) -->
     <usb-device vendor-id="9047" product-id="277" />
+    <!-- TP-Link Archer T3U (RTL8812BU) -->
+    <usb-device vendor-id="9047" product-id="301" />
+    <!-- TP-Link Archer T3U Plus (RTL8812BU) -->
+    <usb-device vendor-id="9047" product-id="312" />
     <!-- Realtek RTL8812BU -->
     <usb-device vendor-id="3034" product-id="47122" />
 </resources>
