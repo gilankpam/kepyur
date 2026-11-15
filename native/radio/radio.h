@@ -57,6 +57,9 @@ public:
   void set_watch_rate(int rate_sel);
   // Debug: gain for the next tune: < 0 = the chip's AGC, else fixed gain in dB (CCA off, IGI pinned).
   void set_gain(double db);
+  // NTSC chroma comb (DecoderOpts::comb) from the next watch(): fewer rainbows on fine detail and OSD text,
+  // ~15 % more decode CPU. Off by default.
+  void set_comb(bool on);
   // Debug: save the next `seconds` of watched IQ as PREFIX.cs16 + PREFIX.json (kp_replay reads them).
   void record(double seconds, const std::string &prefix);
 
@@ -94,6 +97,7 @@ private:
   int _watch_rate = 1;
   bool _fallback = false;  // 40 MS/s kept faulting during a watch: watch at 20 MS/s until open() / set_watch_rate()
   double _gain_db = -1;
+  bool _comb = false;
   // recording (DSP thread writes; the request is under _m)
   double _rec_req_s = 0;
   std::string _rec_req_prefix;

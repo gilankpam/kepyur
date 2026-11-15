@@ -1,7 +1,7 @@
 // kp_replay: run kepyur's scanner DSP and video decoder over a recording (.cs16 + .json from wsdr_probe,
 // or .sigmf-data + .sigmf-meta) and print lock numbers. The bench for lock robustness.
 //
-//   kp_replay REC.cs16 [--offset HZ] [--start S] [--seconds S] [--cnr DB] [--frames] [--woven] [-v]
+//   kp_replay REC.cs16 [--offset HZ] [--start S] [--seconds S] [--cnr DB] [--frames] [--woven] [--comb] [-v]
 //   kp_replay REC.cs16 --frames | ffplay -f rawvideo -pixel_format rgb0 -video_size 720x480 -i -
 #include <chrono>
 #include <cmath>
@@ -29,7 +29,7 @@ static double json_number(const std::string &txt, const char *key) {
 int main(int argc, char **argv) {
   std::string file;
   double offset = NAN, start = 0, seconds = 0, cnr = 0, fs = 40e6, mix = 0;
-  bool frames = false, woven = false, as20 = false;
+  bool frames = false, woven = false, as20 = false, comb = false;
   for (int i = 1; i < argc; i++) {
     const std::string k = argv[i];
     auto v = [&] { return i + 1 < argc ? argv[++i] : (std::fprintf(stderr, "missing value\n"), std::exit(2), ""); };
@@ -42,10 +42,11 @@ int main(int argc, char **argv) {
     else if (k == "--as20") as20 = true;  // emulate the adapter at 20 MS/s: ~18.4 MHz filter, decimate by 2  // shift the recording by HZ (scanner edge tests)
     else if (k == "--frames") frames = true;
     else if (k == "--woven") woven = true;
+    else if (k == "--comb") comb = true;
     else if (k == "-v") set_log_debug(true);
     else if (k[0] != '-') file = k;
     else {
-      std::fprintf(stderr, "usage: kp_replay REC.cs16 [--offset HZ] [--start S] [--seconds S] [--cnr DB] [--frames] [--woven] [-v]\n");
+      std::fprintf(stderr, "usage: kp_replay REC.cs16 [--offset HZ] [--start S] [--seconds S] [--cnr DB] [--frames] [--woven] [--comb] [-v]\n");
       return 2;
     }
   }
@@ -147,6 +148,7 @@ int main(int argc, char **argv) {
   const double fs_dec = as20 ? fs / 2 : fs;
   DecoderOpts o;
   o.fields = !woven;
+  o.comb = comb;
   int fw = 0, fh = 0;
   FrontEnd fe(fs_dec, offset, [&](const Frame &fr) {
     fw = fr.width;

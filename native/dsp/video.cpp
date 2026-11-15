@@ -64,6 +64,7 @@ public:
   Decoder(double fs, FrameSink sink, const DecoderOpts &o) : fs(fs), sink(std::move(sink)), o(o) {
     luma_ring.assign(8192, 0);
     chroma_ring.assign(8192, cf{});
+    comp_ring.assign(8192, 0);
     ring_mask = 8191;
     // chroma: mixed down by the subcarrier, 4th-order Butterworth low-pass at 1.2 MHz (U/V bandwidth)
     for (Biquad *b : {&cl_r1, &cl_i1}) b->design(1.2e6, fs, 0.54);
@@ -105,8 +106,26 @@ public:
     med_a = s;
     luma_ring[n & ring_mask] = luma_notch.run(lp_luma2.run(lp_luma.run(d)));
     if (o.colour) {
+      float cd = d;
+      if (comb) {
+        comp_ring[n & ring_mask] = d;
+        if (T != comb_T) {  // T moves a little once a line: the weights only change then
+          comb_T = T;
+          const double back = std::ceil(T);  // sample n - T lies between n - back and n - back + 1
+          comb_back = static_cast<int64_t>(back);
+          const float t = static_cast<float>(back - T), t2 = t * t, t3 = t2 * t;
+          comb_w[0] = 0.5f * (-t3 + 2 * t2 - t);
+          comb_w[1] = 0.5f * (3 * t3 - 5 * t2 + 2);
+          comb_w[2] = 0.5f * (-3 * t3 + 4 * t2 + t);
+          comb_w[3] = 0.5f * (t3 - t2);
+        }
+        const int64_t i1 = static_cast<int64_t>(n) - comb_back;
+        const float prev = comb_w[0] * comp_ring[(i1 - 1) & ring_mask] + comb_w[1] * comp_ring[i1 & ring_mask] +
+                           comb_w[2] * comp_ring[(i1 + 1) & ring_mask] + comb_w[3] * comp_ring[(i1 + 2) & ring_mask];
+        cd = 0.5f * (d - prev);
+      }
       // the oscillator's phase belongs to the absolute sample index: burst and picture share it
-      const cf c = d * std::conj(lo);
+      const cf c = cd * std::conj(lo);
       lo *= lo_step;
       if ((n & 4095) == 0) lo /= std::abs(lo);
       chroma_ring[n & ring_mask] = cf(cl_r2.run(cl_r1.run(c.real())), cl_i2.run(cl_i1.run(c.imag())));
@@ -161,6 +180,15 @@ private:
   uint64_t n = 0;
   std::vector<float> luma_ring;
   std::vector<cf> chroma_ring;  // chroma at baseband (U/V before the burst rotation)
+  // NTSC 1H comb for chroma (DecoderOpts::comb): the subcarrier is 227.5 x the line rate, so chroma flips
+  // sign from one line to the next while picture detail mostly repeats. (d - d[-1H]) / 2 keeps chroma and
+  // cancels luma detail near the subcarrier, which the 1.2 MHz chroma filter alone lets through as rainbows
+  // on fine patterns and on the edges of white OSD text. Luma keeps the notch. PAL (2H pattern) is unchanged.
+  std::vector<float> comp_ring;  // discriminator output, for the one-line delay
+  bool comb = false;
+  double comb_T = -1;            // T the interpolator below was set up for
+  int64_t comb_back = 0;         // whole samples back to the interpolation's second tap
+  float comb_w[4] = {};          // 4-tap cubic (Catmull-Rom) weights: linear would leave ~15 % at 3.58 MHz
   size_t ring_mask;
   // kepyur: colour. A free-running oscillator at the nominal subcarrier mixes chroma to baseband; a
   // per-line PLL on the burst tracks the transmitter's subcarrier phase (and its small frequency error);
@@ -220,6 +248,7 @@ private:
     const double a = 2 * M_PI * fsc / fs;
     lo_step = cf(static_cast<float>(std::cos(a)), static_cast<float>(std::sin(a)));
     luma_notch.notch(fsc, fs, 1.5);  // the subcarrier out of the picture (also the B/W herringbone)
+    comb = o.comb && &s != &kPal;
     prev_uv.assign(o.width, cf{});
     colour_on = false;
     c_good = 0;

@@ -53,6 +53,7 @@ struct DecoderOpts {
   int std_force = 0;           // 0 auto, 1 NTSC, 2 PAL
   bool force_invert = false;   // only try sync at the high-frequency end
   bool colour = true;          // decode colour (falls back to grey when there is no usable burst)
+  bool comb = false;           // NTSC: 1H comb for chroma (fewer rainbows on fine detail and OSD text; ~+15 % decode)
 };
 
 class Decoder;

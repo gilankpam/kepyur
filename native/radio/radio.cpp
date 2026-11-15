@@ -218,6 +218,11 @@ void Radio::set_gain(double db) {
   _gain_db = db;
 }
 
+void Radio::set_comb(bool on) {
+  std::lock_guard<std::mutex> l(_m);
+  _comb = on;
+}
+
 void Radio::record(double seconds, const std::string &prefix) {
   std::lock_guard<std::mutex> l(_m);
   _rec_req_s = seconds;
@@ -394,7 +399,12 @@ void Radio::handle_watch(Bank &b) {
   // ignore banks from before the retune (or the rate change of a fallback)
   if (std::fabs(b.centre_hz + b.shift_hz - req) > 1e3 || b.fs != wsdr::Receiver::rate_of(req_rate)) return;
   if (!_fe || b.fs != _fe_fs || b.shift_hz != _fe_shift) {
-    _fe = std::make_shared<FrontEnd>(b.fs, b.shift_hz, _frames);
+    DecoderOpts o;
+    {
+      std::lock_guard<std::mutex> l(_m);
+      o.comb = _comb;
+    }
+    _fe = std::make_shared<FrontEnd>(b.fs, b.shift_hz, _frames, o);
     _fe_fs = b.fs;
     _fe_shift = b.shift_hz;
   } else if (b.gen != _fe_gen) {
