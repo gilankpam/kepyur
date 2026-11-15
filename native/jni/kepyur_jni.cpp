@@ -187,6 +187,10 @@ JNIEXPORT void JNICALL Java_com_kepyur_app_Native_setGain(JNIEnv *, jclass, jdou
   if (g_radio) g_radio->set_gain(db);
 }
 
+JNIEXPORT void JNICALL Java_com_kepyur_app_Native_setComb(JNIEnv *, jclass, jboolean on) {
+  if (g_radio) g_radio->set_comb(on);
+}
+
 JNIEXPORT void JNICALL Java_com_kepyur_app_Native_record(JNIEnv *env, jclass, jdouble seconds, jstring prefix) {
   const char *p = env->GetStringUTFChars(prefix, nullptr);
   if (g_radio) g_radio->record(seconds, p);

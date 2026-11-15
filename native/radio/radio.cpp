@@ -289,6 +289,7 @@ void Radio::dsp_loop() {
         {
           std::lock_guard<std::mutex> l(_m);
           rate = _fallback && _watch_rate == 1 ? 2 : _watch_rate;
+          _watch_comb = _comb;  // a decoder rebuilt later in this watch (fallback, shift) keeps it
         }
         KP_LOGI("radio: watch %.3f MHz at %.0f MS/s", hz / 1e6, wsdr::Receiver::rate_of(rate) / 1e6);
         _watch_faults.clear();
@@ -400,10 +401,7 @@ void Radio::handle_watch(Bank &b) {
   if (std::fabs(b.centre_hz + b.shift_hz - req) > 1e3 || b.fs != wsdr::Receiver::rate_of(req_rate)) return;
   if (!_fe || b.fs != _fe_fs || b.shift_hz != _fe_shift) {
     DecoderOpts o;
-    {
-      std::lock_guard<std::mutex> l(_m);
-      o.comb = _comb;
-    }
+    o.comb = _watch_comb;
     _fe = std::make_shared<FrontEnd>(b.fs, b.shift_hz, _frames, o);
     _fe_fs = b.fs;
     _fe_shift = b.shift_hz;

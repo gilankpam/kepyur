@@ -64,7 +64,6 @@ public:
   Decoder(double fs, FrameSink sink, const DecoderOpts &o) : fs(fs), sink(std::move(sink)), o(o) {
     luma_ring.assign(8192, 0);
     chroma_ring.assign(8192, cf{});
-    comp_ring.assign(8192, 0);
     ring_mask = 8191;
     // chroma: mixed down by the subcarrier, 4th-order Butterworth low-pass at 1.2 MHz (U/V bandwidth)
     for (Biquad *b : {&cl_r1, &cl_i1}) b->design(1.2e6, fs, 0.54);
@@ -106,26 +105,8 @@ public:
     med_a = s;
     luma_ring[n & ring_mask] = luma_notch.run(lp_luma2.run(lp_luma.run(d)));
     if (o.colour) {
-      float cd = d;
-      if (comb) {
-        comp_ring[n & ring_mask] = d;
-        if (T != comb_T) {  // T moves a little once a line: the weights only change then
-          comb_T = T;
-          const double back = std::ceil(T);  // sample n - T lies between n - back and n - back + 1
-          comb_back = static_cast<int64_t>(back);
-          const float t = static_cast<float>(back - T), t2 = t * t, t3 = t2 * t;
-          comb_w[0] = 0.5f * (-t3 + 2 * t2 - t);
-          comb_w[1] = 0.5f * (3 * t3 - 5 * t2 + 2);
-          comb_w[2] = 0.5f * (-3 * t3 + 4 * t2 + t);
-          comb_w[3] = 0.5f * (t3 - t2);
-        }
-        const int64_t i1 = static_cast<int64_t>(n) - comb_back;
-        const float prev = comb_w[0] * comp_ring[(i1 - 1) & ring_mask] + comb_w[1] * comp_ring[i1 & ring_mask] +
-                           comb_w[2] * comp_ring[(i1 + 1) & ring_mask] + comb_w[3] * comp_ring[(i1 + 2) & ring_mask];
-        cd = 0.5f * (d - prev);
-      }
       // the oscillator's phase belongs to the absolute sample index: burst and picture share it
-      const cf c = cd * std::conj(lo);
+      const cf c = d * std::conj(lo);
       lo *= lo_step;
       if ((n & 4095) == 0) lo /= std::abs(lo);
       chroma_ring[n & ring_mask] = cf(cl_r2.run(cl_r1.run(c.real())), cl_i2.run(cl_i1.run(c.imag())));
@@ -180,15 +161,31 @@ private:
   uint64_t n = 0;
   std::vector<float> luma_ring;
   std::vector<cf> chroma_ring;  // chroma at baseband (U/V before the burst rotation)
-  // NTSC 1H comb for chroma (DecoderOpts::comb): the subcarrier is 227.5 x the line rate, so chroma flips
-  // sign from one line to the next while picture detail mostly repeats. (d - d[-1H]) / 2 keeps chroma and
-  // cancels luma detail near the subcarrier, which the 1.2 MHz chroma filter alone lets through as rainbows
-  // on fine patterns and on the edges of white OSD text. Luma keeps the notch. PAL (2H pattern) is unchanged.
-  std::vector<float> comp_ring;  // discriminator output, for the one-line delay
+  // kepyur: NTSC chroma comb (DecoderOpts::comb). The subcarrier is 227.5 x the line rate, so at the same
+  // place one line away chroma comes back with the subcarrier's sign flipped while luma detail does not:
+  // combing cancels the luma near the subcarrier that the 1.2 MHz chroma filter lets through as rainbows.
+  // It works on the baseband chroma already in chroma_ring, inside render_line: each line is drawn one line
+  // late, once the line below is in, and combed with both neighbours (centred, so chroma stays on luma's
+  // line). Adaptive: per pixel a neighbour only counts as far as its luma there matches this line's, so the
+  // top and bottom edges of OSD glyphs fall back to the plain filter instead of keeping half the rainbow.
+  // Luma keeps the notch. PAL (2H subcarrier pattern) is unchanged.
+  struct CombLine {
+    double ls = -1;
+    int64_t k = -1;
+    int field = -1;
+    bool col = false;  // drawn in colour
+    bool ok = false;   // usable as a neighbour: locked, in colour, burst on the PLL's predicted phase
+    uint64_t epoch = 0;
+  };
+  static constexpr float kCombFull = 0.08f, kCombNone = 0.25f;  // luma mismatch, of black-to-white
+  static constexpr float kCombMaxErr = 0.35f;  // rad: a burst further off means the stream jumped
   bool comb = false;
-  double comb_T = -1;            // T the interpolator below was set up for
-  int64_t comb_back = 0;         // whole samples back to the interpolation's second tap
-  float comb_w[4] = {};          // 4-tap cubic (Catmull-Rom) weights: linear would leave ~15 % at 3.58 MHz
+  double comb_w = 0;           // the mixing oscillator's frequency, rad per sample
+  uint64_t comb_epoch = 0;     // bumped where the sample stream may have jumped: lines across it don't mix
+  CombLine comb_up, comb_mid;  // the two lines before the current one
+  float burst_e = 0;           // |phase error| of the last burst against the PLL's prediction
+  std::vector<float> comb_m;   // draw_line: the comb on every other pixel (see there)
+  std::vector<cf> comb_o;
   size_t ring_mask;
   // kepyur: colour. A free-running oscillator at the nominal subcarrier mixes chroma to baseband; a
   // per-line PLL on the burst tracks the transmitter's subcarrier phase (and its small frequency error);
@@ -249,6 +246,8 @@ private:
     lo_step = cf(static_cast<float>(std::cos(a)), static_cast<float>(std::sin(a)));
     luma_notch.notch(fsc, fs, 1.5);  // the subcarrier out of the picture (also the B/W herringbone)
     comb = o.comb && &s != &kPal;
+    comb_w = a;
+    comb_epoch++;
     prev_uv.assign(o.width, cf{});
     colour_on = false;
     c_good = 0;
@@ -288,6 +287,7 @@ private:
     gated_lines = 0;
     miss_run = stray_run = 0;
     last_stray = -1;
+    comb_epoch++;
   }
 
   void track_levels(float m) {
@@ -458,6 +458,7 @@ private:
       pal_v = e > 0;
       e += pal_v ? -M_PI / 4 : M_PI / 4;
     }
+    burst_e = static_cast<float>(std::fabs(e));
     if (c_last_line < 0) {
       c_phase = pred + e;
       c_dphi = 0;
@@ -480,10 +481,45 @@ private:
   void render_line(double ls, bool locked_line) {
     if (cur_field < 0) return;
     const int64_t k = static_cast<int64_t>(line_idx) - field_line0 - std_->skip;
+    if (comb) {
+      comb_line(ls, k, locked_line);
+      return;
+    }
     if (k < 0 || k >= std_->active) return;
     if (locked_line) measure_levels(ls);
     bool pal_v = false;
     const bool col = o.colour && locked_line && burst(ls, pal_v);
+    draw_line(ls, k, col, pal_v, false, false);
+  }
+
+  // NTSC comb: line k is measured now (levels, burst) and the previous one, k - 1, is drawn, combed with
+  // k - 2 and k. A neighbour is used only if both lines are locked and in colour, in the same field and on
+  // the same side of any jump in the stream (comb_epoch, and a burst on its predicted phase).
+  void comb_line(double ls, int64_t k, bool locked_line) {
+    CombLine cur;
+    cur.ls = ls;
+    cur.k = k;
+    cur.field = cur_field;
+    cur.epoch = comb_epoch;
+    if (k >= 0 && k < std_->active) {
+      if (locked_line) measure_levels(ls);
+      bool pal_v = false;
+      cur.col = o.colour && locked_line && burst(ls, pal_v);
+      cur.ok = cur.col && burst_e < kCombMaxErr;
+    }
+    const CombLine &m = comb_mid;
+    if (m.field == cur_field && m.k == k - 1 && m.k >= 0 && m.k < std_->active) {
+      const auto pair = [&](const CombLine &x, int64_t dk) {
+        return m.ok && x.ok && x.field == m.field && x.k == m.k + dk && x.epoch == m.epoch;
+      };
+      draw_line(m.ls, m.k, m.col, false, pair(comb_up, -1), pair(cur, 1));
+    }
+    comb_up = comb_mid;
+    comb_mid = cur;
+  }
+
+  // up / dn: comb this line's chroma with the line above / below (see comb_line)
+  void draw_line(double ls, int64_t k, bool col, bool pal_v, bool up, bool dn) {
     uint32_t *row = reinterpret_cast<uint32_t *>((cur_field == 0 ? fieldA : fieldB).data()) + static_cast<size_t>(k) * o.width;
     const double a0 = std_->a0_us * 1e-6 * fs, aw = std_->aw_us * 1e-6 * fs;
     const float white = blank + 2.5f * (blank - tip);
@@ -494,6 +530,57 @@ private:
     const cf rot = std::polar(1.f, static_cast<float>(-c_phase));
     const double cdel = 0.21e-6 * fs;  // chroma filter delay minus luma filter delay
     const bool pal = std_ == &kPal;
+    // the comb's neighbours sit one line period T (Ti whole samples and Tf more) away, turned onto this
+    // line's subcarrier phase: the oscillator runs on the absolute sample index, so what is mixed down one
+    // line away comes out turned by w*T
+    if (dn && ls + a0 + aw + cdel + T + 2 >= static_cast<double>(n)) dn = false;
+    if (up && static_cast<double>(n) - (ls + a0 - T) > static_cast<double>(ring_mask) - 8) up = false;
+    // The comb, on every other pixel (chroma is 1.2 MHz wide; per pixel cost twice as much for nothing
+    // visible) and interpolated in between below: chroma becomes c * (1 - comb_m) - comb_o.
+    const bool comb_on = col && (up || dn);
+    if (comb_on) {
+      const int64_t Ti = static_cast<int64_t>(T);
+      const float Tf = static_cast<float>(T - Ti);
+      const cf turn = std::polar(1.f, static_cast<float>(-comb_w * T));  // the line above; below: conj
+      const float wk = std::fabs(yscale) / (kCombNone - kCombFull), w1 = kCombNone / (kCombNone - kCombFull);
+      const int nc = (o.width + 1) / 2;
+      comb_m.resize(nc + 1);
+      comb_o.resize(nc + 1);
+      const double step = 2 * aw / o.width;
+      for (int h = 0; h < nc; h++) {
+        comb_m[h] = 0;
+        comb_o[h] = cf{};
+        const double p = ls + a0 + step * h, pc = p + cdel;
+        const int64_t i0 = static_cast<int64_t>(p + 0.5), j0 = static_cast<int64_t>(pc);
+        if (j0 + Ti + 3 >= static_cast<int64_t>(n) || static_cast<int64_t>(n) - (i0 - Ti) > static_cast<int64_t>(ring_mask) - 8) continue;
+        // a neighbour's weight: 1 while its luma here is within kCombFull of this line's, 0 past kCombNone
+        const float y0 = luma_ring[i0 & ring_mask];
+        const float wu = up ? std::clamp(w1 - std::fabs(luma_ring[(i0 - Ti) & ring_mask] - y0) * wk, 0.f, 1.f) : 0.f;
+        const float wd = dn ? std::clamp(w1 - std::fabs(luma_ring[(i0 + Ti) & ring_mask] - y0) * wk, 0.f, 1.f) : 0.f;
+        if (wu + wd <= 0) continue;
+        // A neighbour turned onto this line has chroma -c and the same luma detail, so c + the neighbours' mean
+        // is twice the detail: take out half of it per unit of the best weight (all of it at 1).
+        const float m = 0.5f * std::max(wu, wd), sc = m / (wu + wd);
+        const float fc = static_cast<float>(pc - j0);
+        // chroma_ring at j + t (0 <= t < 2), in plain floats: branch-free, and std::complex cost more here
+        float orr = 0, oi = 0;
+        const auto take = [&](int64_t j, float t, float rr, float ri) {
+          const int iw = static_cast<int>(t);
+          j += iw;
+          t -= static_cast<float>(iw);
+          const cf a = chroma_ring[j & ring_mask], b = chroma_ring[(j + 1) & ring_mask];
+          const float xr = a.real() + (b.real() - a.real()) * t, xi = a.imag() + (b.imag() - a.imag()) * t;
+          orr += xr * rr - xi * ri;
+          oi += xr * ri + xi * rr;
+        };
+        if (wu > 0) take(j0 - Ti - 1, fc + 1 - Tf, turn.real() * sc * wu, turn.imag() * sc * wu);
+        if (wd > 0) take(j0 + Ti, fc + Tf, turn.real() * sc * wd, -turn.imag() * sc * wd);
+        comb_m[h] = m;
+        comb_o[h] = cf(orr, oi);
+      }
+      comb_m[nc] = comb_m[nc - 1];
+      comb_o[nc] = comb_o[nc - 1];
+    }
     for (int x = 0; x < o.width; x++) {
       const double p = ls + a0 + aw * x / o.width;
       const int64_t i0 = static_cast<int64_t>(p);
@@ -510,7 +597,13 @@ private:
         const int64_t j0 = static_cast<int64_t>(pc);
         const float fc = static_cast<float>(pc - j0);
         const cf c0 = chroma_ring[j0 & ring_mask], c1 = chroma_ring[(j0 + 1) & ring_mask];
-        const cf c = (c0 + (c1 - c0) * fc) * rot * k_uv;
+        cf c = c0 + (c1 - c0) * fc;
+        if (comb_on) {
+          const int h = x >> 1;
+          if (x & 1) c = c * (1 - 0.5f * (comb_m[h] + comb_m[h + 1])) - 0.5f * (comb_o[h] + comb_o[h + 1]);
+          else c = c * (1 - comb_m[h]) - comb_o[h];
+        }
+        c *= rot * k_uv;
         float u = -c.real(), v = -c.imag();
         if (pal) {
           if (pal_v) v = -v;
@@ -613,6 +706,7 @@ private:
     last_stray = edge;
     if (stray_run >= 6 && miss_run >= 4) {
       rephases++;
+      comb_epoch++;
       KP_LOGD("video: re-phased the line grid by %.1f us", (edge - line_start) / fs * 1e6);
       line_start = edge;
       line_low = 0;

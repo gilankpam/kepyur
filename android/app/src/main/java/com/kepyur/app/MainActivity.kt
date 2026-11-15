@@ -107,12 +107,18 @@ class MainActivity : Activity() {
         debugExtras(intent)
     }
 
-    /** adb shell am start -n com.kepyur.app/.MainActivity --ei watchrate 1|2 --ef gain 30 --ef record 3 */
+    /** adb shell am start -n com.kepyur.app/.MainActivity --ei watchrate 1|2 --ef gain 30 --ez comb true --ef record 3 */
     private fun debugExtras(i: Intent) {
         if (i.hasExtra("gain")) {
             val g = i.getFloatExtra("gain", -1f).toDouble()
             Native.setGain(g)
             Native.log("debug: gain ${if (g < 0) "AGC" else "$g dB"}")
+            if (watchingHz > 0 && state == State.RUNNING && !i.hasExtra("watchrate")) Native.watch(watchingHz)
+        }
+        if (i.hasExtra("comb")) {
+            val on = i.getBooleanExtra("comb", false)
+            Native.setComb(on)
+            Native.log("debug: comb ${if (on) "on" else "off"}")
             if (watchingHz > 0 && state == State.RUNNING && !i.hasExtra("watchrate")) Native.watch(watchingHz)
         }
         if (i.hasExtra("watchrate")) {

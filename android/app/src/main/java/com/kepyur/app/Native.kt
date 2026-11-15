@@ -20,6 +20,8 @@ object Native {
     @JvmStatic external fun setWatchRate(rateSel: Int)
     /** Debug: gain from the next tune on: < 0 = the chip's AGC, else fixed gain (dB). */
     @JvmStatic external fun setGain(db: Double)
+    /** NTSC chroma comb (fewer rainbows on OSD text, ~15 % more decode CPU), from the next watch on. */
+    @JvmStatic external fun setComb(on: Boolean)
     /** Debug: save the next [seconds] of watched IQ as [prefix].cs16 + .json. */
     @JvmStatic external fun record(seconds: Double, prefix: String)
     @JvmStatic external fun status(): String
